@@ -140,9 +140,6 @@ const toolImpls = {
       await sleep(1000); // let VRAM settle
     }
 
-    // Throttle ComfyUI's process priority so the system stays usable
-    throttleComfyUI();
-
     const checkpoint = getSetting('comfyui_checkpoint', 'sd_xl_base_1.0.safetensors');
     const imgWidth = getSetting('comfyui_width', 768);
     const imgHeight = getSetting('comfyui_height', 768);
@@ -211,9 +208,8 @@ const toolImpls = {
     for (let i = 0; i < 300; i++) {
       await sleep(1000);
       if (_abortController && _abortController.signal.aborted) return JSON.stringify({ error: 'Aborted' });
-      // Re-throttle every 10s and show progress
+      // Show progress every 10s
       if (i % 10 === 0 && i > 0) {
-        throttleComfyUI();
         const v = getVramUsage();
         broadcast('geniva-activity', `🎨 Generating... (${i}s, VRAM: ${v.pct}%)`);
       }
@@ -845,15 +841,9 @@ function getVramUsage() {
   } catch { return { used: 0, total: 16376, pct: 0 }; }
 }
 
-// Lower ComfyUI's python process priority so the system stays responsive during image generation
-function throttleComfyUI() {
-  try {
-    // ComfyUI runs as python.exe — set all python processes to below normal
-    // (non-blocking so we don't freeze the UI)
-    const p = cpSpawn('wmic', ['process', 'where', "name='python.exe'", 'call', 'setpriority', 'below normal'], { shell: true, stdio: 'ignore' });
-    p.on('error', () => {});
-  } catch {}
-}
+// NOTE: We do NOT throttle ComfyUI/python processes — other apps (YettiPaintStudio etc.)
+// share the same ComfyUI instance. Geniva manages VRAM by unloading its own Ollama model
+// before ComfyUI calls, which is enough to prevent VRAM conflicts.
 
 // ─── Adaptive Performance Monitor ───
 // Samples GPU, RAM, and CPU to detect system pressure and adjust Geniva's intensity in real-time.
@@ -1002,11 +992,6 @@ function computeThrottle(perf) {
 async function adaptiveThrottle() {
   const perf = await sampleSystemMetrics();
   const throttle = computeThrottle(perf);
-
-  // If GPU is heavily loaded (ComfyUI generating, game running, etc), throttle those too
-  if (perf.gpuUtil > 80) {
-    throttleComfyUI();
-  }
 
   if (throttle.delayMs > 0) {
     await sleep(throttle.delayMs);
