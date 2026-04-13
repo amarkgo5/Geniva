@@ -1,0 +1,21 @@
+node_modules/
+
+# Personal data — generated at runtime
+memory.json
+history.json
+learning.json
+worklog.json
+
+# Temp files created by Geniva during tasks
+scripts/
+runescape_game/
+*.py
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Shortcuts and installers
+make_shortcut.ps1
+*.lnk

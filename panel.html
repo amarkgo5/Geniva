@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Geniva — Panel</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:'Segoe UI',system-ui,sans-serif;background:#1a1a1a;color:#e0e0e0;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+
+  /* Header */
+  .hdr{display:flex;align-items:center;padding:8px 12px;background:#222;border-bottom:1px solid #333;gap:8px;-webkit-app-region:drag;flex-shrink:0}
+  .hdr svg{width:36px;height:40px;flex-shrink:0}
+  .hdr h1{font-size:16px;color:#4ade80;font-weight:600}
+  .hdr .spacer{flex:1}
+  .hdr button{-webkit-app-region:no-drag;background:none;border:none;color:#888;cursor:pointer;font-size:13px;padding:4px 8px;border-radius:4px}
+  .hdr button:hover{color:#4ade80;background:#333}
+
+  /* Brain toggle */
+  .brain-toggle{display:flex;background:#111;border-radius:14px;border:1px solid #333;overflow:hidden;-webkit-app-region:no-drag}
+  .bb{padding:4px 10px;font-size:11px;font-weight:600;border:none;background:transparent;color:#555;cursor:pointer;transition:all 0.2s}
+  .bb:hover{color:#aaa}
+  .bb.a-local{background:#3b1515;color:#f87171}
+  .bb.a-claude-code{background:#3b3515;color:#fbbf24}
+  .bb.a-claude-api{background:#153b20;color:#4ade80}
+  .model-lbl{font-size:10px;color:#666;margin-left:6px;-webkit-app-region:no-drag}
+
+  /* Main */
+  .main{display:flex;flex:1;overflow:hidden}
+
+  /* Chat */
+  .chat{flex:58;display:flex;flex-direction:column;border-right:1px solid #2a2a2a;min-width:0}
+  .chat-msgs{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px}
+  .msg{max-width:88%;padding:8px 12px;border-radius:12px;font-size:13px;line-height:1.4;white-space:pre-wrap;word-wrap:break-word}
+  .msg.g{align-self:flex-start;background:#1e3a28;border-bottom-left-radius:4px}
+  .msg.u{align-self:flex-end;background:#2a2a2a;border-bottom-right-radius:4px}
+  .msg .mh{display:flex;align-items:center;gap:5px;margin-bottom:3px;font-size:10px;color:#5a8a6a}
+  .msg .mh svg{width:18px;height:20px}
+  .msg .mh .nm{color:#4ade80;font-weight:600}
+  .msg .mh .nm.un{color:#60a5fa}
+  .msg .mb{color:#d0e8d8}
+  .msg.u .mb{color:#ccc}
+
+  /* Input */
+  .chat-input{display:flex;padding:8px 12px;gap:6px;background:#222;border-top:1px solid #333;flex-shrink:0;-webkit-app-region:no-drag}
+  .chat-input .ci-attach{padding:6px 10px;border-radius:6px;border:1px solid #444;background:#2a2a2a;color:#888;font-size:14px;cursor:pointer}
+  .chat-input .ci-attach:hover{color:#4ade80;border-color:#4ade80}
+  .chat-input .ci-field{flex:1;padding:8px 12px;border-radius:6px;border:1px solid #444;background:#2a2a2a;color:#e0e0e0;font-size:13px;outline:none;min-height:20px;max-height:120px;overflow-y:auto;white-space:pre-wrap;word-wrap:break-word}
+  .chat-input .ci-field:empty::before{content:attr(data-ph);color:#666;font-style:normal}
+  .chat-input .ci-field:focus{border-color:#4ade80}
+  .chat-input .ci-send{padding:8px 16px;border-radius:6px;border:none;background:#4ade80;color:#111;font-size:13px;font-weight:600;cursor:pointer}
+  .chat-input .ci-send:hover{background:#22c55e}
+  .chat-input .ci-stop{padding:8px 12px;border-radius:6px;border:none;background:#ef4444;color:#fff;font-size:13px;font-weight:600;cursor:pointer}
+
+  /* Panel attachment preview */
+  .p-attach-preview{
+    display:none;padding:4px 10px;background:#252525;border-top:1px solid #333;
+    align-items:center;gap:8px;font-size:11px;color:#aaa;flex-shrink:0;
+  }
+  .p-attach-preview.vis{display:flex}
+  .p-attach-preview img{width:40px;height:40px;object-fit:cover;border-radius:4px;border:1px solid #444}
+  .p-attach-preview .pap-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#4ade80}
+  .p-attach-preview .pap-rm{background:none;border:none;color:#f87171;cursor:pointer;font-size:14px;padding:2px 6px}
+  .p-attach-preview .pap-rm:hover{color:#ef4444}
+
+  /* Chat drop overlay */
+  .chat-drop{
+    display:none;position:absolute;inset:0;z-index:30;
+    background:rgba(26,26,26,0.92);border:2px dashed rgba(74,222,128,0.5);
+    flex-direction:column;align-items:center;justify-content:center;
+    color:#4ade80;font-size:14px;gap:6px;pointer-events:none;
+  }
+  .chat-drop.active{display:flex}
+  .chat-drop .cd-icon{font-size:32px;opacity:0.6}
+
+  /* Right panel */
+  .rpanel{flex:42;display:flex;flex-direction:column;background:#1e1e1e;overflow-y:auto;min-width:0}
+  .sec{border-bottom:1px solid #2a2a2a}
+  .sec-h{padding:8px 12px;font-size:12px;font-weight:600;color:#4ade80;cursor:pointer;background:#222;display:flex;align-items:center;gap:6px;user-select:none}
+  .sec-h:hover{background:#282828}
+  .sec-h .arr{font-size:9px;transition:transform 0.2s;display:inline-block}
+  .sec-h .arr.open{transform:rotate(90deg)}
+  .sec-b{display:none}
+  .sec-b.open{display:block}
+
+  /* Activity */
+  .act-log{max-height:300px;overflow-y:auto;padding:6px 12px;font-family:'Cascadia Code',monospace;font-size:11px;line-height:1.5}
+  .ale{padding:2px 0;border-bottom:1px solid #252525;color:#aaa}
+  .ale .at{color:#555;font-size:9px;margin-right:5px}
+
+  /* Memory */
+  .mem-body{padding:6px 12px;max-height:250px;overflow-y:auto}
+  .mr{display:flex;gap:4px;padding:3px 0;border-bottom:1px solid #252525;font-size:11px;align-items:flex-start}
+  .mr .mk{color:#4ade80;font-weight:600;min-width:100px;word-break:break-all}
+  .mr .mv{color:#ccc;flex:1;font-family:monospace;font-size:10px;word-break:break-all}
+  .mr .mv.pw{color:#666}
+  .mr .ma{display:flex;gap:2px;flex-shrink:0}
+  .mr .ma button{background:none;border:none;color:#555;cursor:pointer;font-size:10px;padding:1px 3px}
+  .mr .ma button:hover{color:#4ade80}
+  .mr .ma button.dl:hover{color:#ef4444}
+  .mcr{padding:6px 0;text-align:right}
+  .mcr button{background:#3b1515;border:1px solid #ef444444;color:#f87171;font-size:10px;padding:3px 10px;border-radius:4px;cursor:pointer}
+
+  /* Settings */
+  .set-body{padding:8px 12px}
+  .sr{margin-bottom:8px}
+  .sr label{display:block;font-size:10px;color:#888;margin-bottom:2px}
+  .sr input{width:100%;padding:5px 8px;border-radius:4px;border:1px solid #444;background:#2a2a2a;color:#e0e0e0;font-size:11px;outline:none}
+  .sr input:focus{border-color:#4ade80}
+
+  /* Footer */
+  .ftr{padding:5px 12px;background:#222;border-top:1px solid #333;font-size:10px;color:#555;flex-shrink:0;display:flex;gap:8px}
+  .ftr .online{color:#4ade80}
+  .ftr .offline{color:#ef4444}
+
+  /* Thinking spinner */
+  .thinking{display:none;align-self:flex-start;padding:8px 14px;background:#1e3a28;border-radius:12px;border-bottom-left-radius:4px}
+  .thinking.vis{display:flex;align-items:center;gap:8px}
+  .thinking .spin{width:14px;height:14px;border:2px solid #2a5a3a;border-top-color:#4ade80;border-radius:50%;animation:sp 0.7s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .thinking .stxt{font-size:12px;color:#4ade80}
+
+  ::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#444;border-radius:3px}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <img src="geniva-fairy.png" style="width:36px;height:auto;image-rendering:pixelated" draggable="false">
+  <h1>Geniva</h1>
+  <div class="brain-toggle">
+    <button class="bb a-local" data-b="local">Local</button>
+    <button class="bb" data-b="claude-code">Code</button>
+    <button class="bb" data-b="claude-api">API</button>
+  </div>
+  <span class="model-lbl" id="model-lbl">geniva-brain</span>
+  <div class="spacer"></div>
+  <button id="btn-min" title="Hide panel">&#9652; Hide</button>
+  <button id="btn-close" title="Close">&#10005;</button>
+</div>
+
+<div class="main">
+  <div class="chat" style="position:relative">
+    <div class="chat-drop" id="chat-drop"><span class="cd-icon">&#128206;</span><span>Drop images or files here</span></div>
+    <div class="chat-msgs" id="chat-msgs">
+      <div class="thinking" id="thinking"><div class="spin"></div><span class="stxt">Thinking...</span></div>
+    </div>
+    <div class="p-attach-preview" id="p-attach-preview">
+      <img id="p-attach-thumb" src="">
+      <span class="pap-name" id="p-attach-name"></span>
+      <button class="pap-rm" id="p-attach-rm" title="Remove">&#10005;</button>
+    </div>
+    <div class="chat-input">
+      <button class="ci-attach" id="p-clip" title="Attach image">&#128206;</button>
+      <div class="ci-field" id="p-input" contenteditable="true" data-ph="Give Geniva a task..."></div>
+      <button class="ci-send" id="p-send">Send</button>
+      <button class="ci-stop" id="p-stop">Stop</button>
+    </div>
+  </div>
+
+  <div class="rpanel">
+    <div class="sec">
+      <div class="sec-h" data-s="act"><span class="arr open">&#9654;</span> &#9889; Activity</div>
+      <div class="sec-b open"><div class="act-log" id="act-log"></div></div>
+    </div>
+    <div class="sec">
+      <div class="sec-h" data-s="mem"><span class="arr">&#9654;</span> &#129504; Memory</div>
+      <div class="sec-b"><div class="mem-body" id="mem-body"></div></div>
+    </div>
+    <div class="sec">
+      <div class="sec-h" data-s="set"><span class="arr">&#9654;</span> &#9881; Settings</div>
+      <div class="sec-b"><div class="set-body" id="set-body">
+        <div class="sr"><label>Ollama URL</label><input value="http://localhost:11434" data-key="ollama_url"></div>
+        <div class="sr"><label>Local Model</label><input value="geniva-brain" data-key="local_model"></div>
+        <div class="sr"><label>Vision Model</label><input value="llava" data-key="vision_model"></div>
+        <div class="sr"><label>ComfyUI URL</label><input value="http://127.0.0.1:8000" data-key="comfyui_url"></div>
+        <div class="sr"><label>Anthropic API Key</label><input type="password" placeholder="sk-ant-..." data-key="anthropic_api_key"></div>
+        <div class="sr"><label>Claude API Model</label><input value="claude-sonnet-4-6" data-key="claude_api_model"></div>
+        <div class="sr"><label>Max Iterations</label><input type="number" value="20" data-key="max_iterations"></div>
+        <div class="sr"><label>Max Image Match Iter</label><input type="number" value="5" data-key="max_image_match_iterations"></div>
+        <div class="sr"><label>Similarity Threshold %</label><input type="number" value="85" data-key="image_similarity_threshold"></div>
+        <div class="sr"><label>Checkpoint</label><input value="sd_xl_base_1.0.safetensors" data-key="comfyui_checkpoint"></div>
+        <div class="sr"><label>Pixel Art LoRA</label><input value="pixel-art-xl.safetensors" data-key="pixel_art_lora"></div>
+        <div style="padding:6px 0;border-top:1px solid #333;margin-top:8px;font-size:10px;color:#4ade80;font-weight:600">Performance</div>
+        <div class="sr"><label>GPU Layers (lower = less lag, 0 = CPU only)</label><input type="number" value="20" data-key="num_gpu_layers"></div>
+        <div class="sr"><label>Context Size</label><input type="number" value="4096" data-key="num_ctx"></div>
+        <div class="sr"><label>Max Output Tokens</label><input type="number" value="1024" data-key="num_predict"></div>
+        <div class="sr"><label>Batch Size (lower = less spiky)</label><input type="number" value="256" data-key="num_batch"></div>
+      </div></div>
+    </div>
+  </div>
+</div>
+
+<div class="ftr" id="ftr">
+  <span id="f-ollama">Checking...</span>
+  <span>·</span>
+  <span id="f-comfy">Checking...</span>
+  <span>·</span>
+  <span id="f-model">geniva-brain</span>
+  <span>·</span>
+  <span id="f-perf" style="color:#888" title="Adaptive performance monitor">--</span>
+</div>
+
+<script>
+const { ipcRenderer } = require('electron');
+const chatMsgs = document.getElementById('chat-msgs');
+const thinkingEl = document.getElementById('thinking');
+const actLog = document.getElementById('act-log');
+const memBody = document.getElementById('mem-body');
+const pInput = document.getElementById('p-input');
+let attachedImg = null;
+let currentBrain = 'local';
+let _streamDiv = null;
+
+const fairySVG = '<img src="geniva-fairy.png" style="width:18px;height:auto;image-rendering:pixelated" draggable="false">';
+
+function ts(){return new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+
+function addMsg(role, text, imagePath){
+  const d=document.createElement('div');
+  d.className='msg '+(role==='g'?'g':'u');
+  d.innerHTML=`<div class="mh">${role==='g'?fairySVG:''}<span class="nm ${role==='u'?'un':''}">${role==='g'?'Geniva':'You'}</span><span>${ts()}</span></div><div class="mb"></div>`;
+  const mb=d.querySelector('.mb');
+  if(imagePath){
+    const img=document.createElement('img');
+    img.src='file:///'+imagePath.replace(/\\/g,'/');
+    img.style.cssText='max-width:200px;max-height:150px;border-radius:6px;display:block;margin-bottom:4px;border:1px solid #444;cursor:pointer';
+    img.title=imagePath.split(/[\\/]/).pop();
+    img.onclick=()=>{const w=window.open('');w.document.write('<img src="'+img.src+'" style="max-width:100%">')};
+    mb.appendChild(img);
+  }
+  if(text && text!=='(attached image)'){
+    const span=document.createElement('span');span.textContent=text;mb.appendChild(span);
+  }
+  chatMsgs.insertBefore(d,thinkingEl);
+  chatMsgs.scrollTop=chatMsgs.scrollHeight;
+}
+
+function addAct(text){
+  const d=document.createElement('div');d.className='ale';
+  d.innerHTML=`<span class="at">${ts()}</span>${esc(text)}`;
+  actLog.appendChild(d);actLog.scrollTop=actLog.scrollHeight;
+}
+
+// Header
+document.getElementById('btn-min').onclick=()=>ipcRenderer.send('minimize-panel');
+document.getElementById('btn-close').onclick=()=>ipcRenderer.send('close-panel');
+
+// Brain toggle
+const bbs=document.querySelectorAll('.bb');
+function setBrain(mode){
+  currentBrain=mode;
+  ipcRenderer.send('set-brain',mode);
+  bbs.forEach(b=>{b.className='bb'+(b.dataset.b===mode?` a-${mode}`:'')});
+  updateModelLabel();
+}
+bbs.forEach(b=>b.addEventListener('click',()=>setBrain(b.dataset.b)));
+
+function updateModelLabel(){
+  const mem=ipcRenderer.sendSync('get-memory');
+  const lbl=document.getElementById('model-lbl');
+  if(currentBrain==='local')lbl.textContent=mem.local_model||'geniva-brain';
+  else if(currentBrain==='claude-code')lbl.textContent='Claude (Max)';
+  else lbl.textContent=mem.claude_api_model||'Claude Sonnet';
+}
+
+// Collapsible
+document.querySelectorAll('.sec-h').forEach(h=>{
+  h.onclick=()=>{h.querySelector('.arr').classList.toggle('open');h.nextElementSibling.classList.toggle('open')}
+});
+
+// ─── Attachment preview helpers ───
+const pAttachPreview = document.getElementById('p-attach-preview');
+const pAttachThumb = document.getElementById('p-attach-thumb');
+const pAttachName = document.getElementById('p-attach-name');
+document.getElementById('p-attach-rm').onclick = () => clearPAttach();
+
+function setPAttach(filePath) {
+  attachedImg = filePath;
+  const name = filePath.split(/[\\/]/).pop();
+  pAttachName.textContent = name;
+  const ext = name.split('.').pop().toLowerCase();
+  if (['png','jpg','jpeg','gif','webp','bmp'].includes(ext)) {
+    pAttachThumb.src = 'file:///' + filePath.replace(/\\/g, '/');
+    pAttachThumb.style.display = '';
+  } else {
+    pAttachThumb.style.display = 'none';
+  }
+  pAttachPreview.classList.add('vis');
+  pInput.focus();
+}
+
+function clearPAttach() {
+  attachedImg = null;
+  pAttachPreview.classList.remove('vis');
+  pAttachThumb.src = '';
+  pAttachName.textContent = '';
+}
+
+// Send
+function send(){
+  const text=pInput.innerText.trim();if(!text && !attachedImg)return;
+  pInput.innerText='';
+  ipcRenderer.invoke('geniva-task',{message:text || '(attached image)',imagePath:attachedImg});
+  clearPAttach();
+}
+document.getElementById('p-send').onclick=send;
+pInput.onkeydown=e=>{if(e.key==='Enter' && !e.shiftKey){e.preventDefault();send()}};
+document.getElementById('p-stop').onclick=()=>ipcRenderer.send('stop-task');
+document.getElementById('p-clip').onclick=async()=>{
+  const fp=await ipcRenderer.invoke('pick-image');
+  if(fp) setPAttach(fp);
+};
+
+// ─── Paste support (screenshots & images from clipboard) ───
+pInput.addEventListener('paste', async (e) => {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault();
+      const blob = item.getAsFile();
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const fp = await ipcRenderer.invoke('save-pasted-image', { dataUrl: reader.result });
+        if (fp) setPAttach(fp);
+      };
+      reader.readAsDataURL(blob);
+      return;
+    }
+  }
+  // For plain text paste, insert as plain text only
+  if (e.clipboardData.types.includes('text/plain')) {
+    e.preventDefault();
+    document.execCommand('insertText', false, e.clipboardData.getData('text/plain'));
+  }
+});
+
+// ─── Drag and drop support on the chat area ───
+const chatDrop = document.getElementById('chat-drop');
+const chatEl = chatDrop.parentElement;
+let _pDragCounter = 0;
+
+chatEl.addEventListener('dragenter', (e) => {
+  e.preventDefault();
+  _pDragCounter++;
+  chatDrop.classList.add('active');
+});
+chatEl.addEventListener('dragleave', (e) => {
+  e.preventDefault();
+  _pDragCounter--;
+  if (_pDragCounter <= 0) { _pDragCounter = 0; chatDrop.classList.remove('active'); }
+});
+chatEl.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+chatEl.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  _pDragCounter = 0;
+  chatDrop.classList.remove('active');
+
+  if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+    const file = e.dataTransfer.files[0];
+    if (file.path) {
+      setPAttach(file.path);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const fp = await ipcRenderer.invoke('save-dropped-file', { name: file.name, dataUrl: reader.result });
+      if (fp) setPAttach(fp);
+    };
+    reader.readAsDataURL(file);
+  }
+});
+
+// Memory
+function updateMem(mem){
+  memBody.innerHTML='';
+  const keys=Object.keys(mem);
+  if(!keys.length){memBody.innerHTML='<div style="color:#555;font-size:11px;padding:4px">Empty</div>';return}
+  keys.forEach(k=>{
+    const r=document.createElement('div');r.className='mr';
+    const sec=k.toLowerCase().includes('key')||k.toLowerCase().includes('token');
+    const v=typeof mem[k]==='string'?mem[k]:JSON.stringify(mem[k]);
+    r.innerHTML=`<span class="mk">${esc(k)}</span><span class="mv${sec?' pw':''}">${sec?'***':esc(v.substring(0,150))}</span><span class="ma"><button class="ed" title="Edit">&#9998;</button><button class="dl" title="Delete">&#10005;</button></span>`;
+    r.querySelector('.ed').onclick=()=>{const nv=prompt('Edit "'+k+'":',v);if(nv!==null)ipcRenderer.send('save-memory-key',{key:k,value:nv})};
+    r.querySelector('.dl').onclick=()=>{if(confirm('Delete "'+k+'"?'))ipcRenderer.send('delete-memory-key',k)};
+    memBody.appendChild(r);
+  });
+  const cr=document.createElement('div');cr.className='mcr';
+  cr.innerHTML='<button>Clear All</button>';
+  cr.querySelector('button').onclick=()=>{if(confirm('Clear ALL memory?'))ipcRenderer.send('clear-memory')};
+  memBody.appendChild(cr);
+}
+
+// Settings auto-save
+function loadSettings(){
+  const mem=ipcRenderer.sendSync('get-memory');
+  document.querySelectorAll('.set-body input').forEach(el=>{
+    if(el.dataset.key&&mem[el.dataset.key]!==undefined)el.value=mem[el.dataset.key];
+  });
+}
+document.querySelectorAll('.set-body input').forEach(el=>{
+  el.onchange=()=>{
+    if(!el.dataset.key)return;
+    let v=el.value;if(el.type==='number')v=parseFloat(v);
+    const s={};s[el.dataset.key]=v;
+    ipcRenderer.send('save-settings',s);
+    updateModelLabel();
+  }
+});
+
+// IPC
+ipcRenderer.on('geniva-thinking',(_, active)=>{
+  thinkingEl.classList.toggle('vis',active);
+  chatMsgs.scrollTop=chatMsgs.scrollHeight;
+});
+ipcRenderer.on('geniva-reply',(_,text)=>addMsg('g',text));
+ipcRenderer.on('geniva-user-message',(_,data)=>{
+  if(typeof data==='string') addMsg('u',data);
+  else addMsg('u',data.text,data.imagePath);
+});
+ipcRenderer.on('geniva-activity',(_,text)=>addAct(text));
+ipcRenderer.on('geniva-done',()=>{});
+ipcRenderer.on('memory-update',(_,mem)=>updateMem(mem));
+ipcRenderer.on('brain-changed',(_,mode)=>{
+  currentBrain=mode;
+  bbs.forEach(b=>{b.className='bb'+(b.dataset.b===mode?` a-${mode}`:'')});
+  updateModelLabel();
+});
+
+// Streaming
+ipcRenderer.on('geniva-stream-start',()=>{
+  _streamDiv=document.createElement('div');_streamDiv.className='msg g';
+  _streamDiv.innerHTML=`<div class="mh">${fairySVG}<span class="nm">Geniva</span><span>${ts()}</span></div><div class="mb"></div>`;
+  chatMsgs.insertBefore(_streamDiv,thinkingEl);
+});
+ipcRenderer.on('geniva-stream-chunk',(_,chunk)=>{
+  if(_streamDiv){_streamDiv.querySelector('.mb').textContent+=chunk;chatMsgs.scrollTop=chatMsgs.scrollHeight}
+});
+ipcRenderer.on('geniva-stream-end',()=>{_streamDiv=null});
+
+// Startup
+function tsFromDate(ms){return new Date(ms).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}
+
+async function startup(){
+  const mem=ipcRenderer.sendSync('get-memory');
+  updateMem(mem);loadSettings();
+
+  // Load full chat history
+  const chatHist = ipcRenderer.sendSync('get-chat-history');
+  for (const entry of chatHist) {
+    const role = entry.role === 'user' ? 'u' : 'g';
+    const d = document.createElement('div');
+    d.className = 'msg ' + (role==='g'?'g':'u');
+    d.innerHTML = `<div class="mh">${role==='g'?fairySVG:''}<span class="nm ${role==='u'?'un':''}">${role==='g'?'Geniva':'You'}</span><span>${tsFromDate(entry.time)}</span></div><div class="mb"></div>`;
+    const mb = d.querySelector('.mb');
+    if (entry.imagePath) {
+      const img = document.createElement('img');
+      img.src = 'file:///' + entry.imagePath.replace(/\\/g, '/');
+      img.style.cssText = 'max-width:200px;max-height:150px;border-radius:6px;display:block;margin-bottom:4px;border:1px solid #444;cursor:pointer';
+      img.title = entry.imagePath.split(/[\\/]/).pop();
+      img.onclick = () => { const w = window.open(''); w.document.write('<img src="' + img.src + '" style="max-width:100%">') };
+      mb.appendChild(img);
+    }
+    if (entry.text && entry.text !== '(attached image)') {
+      const span = document.createElement('span'); span.textContent = entry.text; mb.appendChild(span);
+    } else if (!entry.imagePath) {
+      mb.textContent = entry.text;
+    }
+    chatMsgs.insertBefore(d, thinkingEl);
+  }
+
+  // Load activity history
+  const actHist = ipcRenderer.sendSync('get-activity-history');
+  for (const entry of actHist) {
+    const d = document.createElement('div'); d.className = 'ale';
+    d.innerHTML = `<span class="at">${tsFromDate(entry.time)}</span>${esc(entry.text)}`;
+    actLog.appendChild(d);
+  }
+
+  if (chatHist.length > 0) chatMsgs.scrollTop = chatMsgs.scrollHeight;
+  if (actHist.length > 0) actLog.scrollTop = actLog.scrollHeight;
+
+  const conn=await ipcRenderer.invoke('check-connections');
+  currentBrain=conn.brain;
+  bbs.forEach(b=>{b.className='bb'+(b.dataset.b===currentBrain?` a-${currentBrain}`:'')});
+  updateModelLabel();
+  document.getElementById('f-ollama').textContent=conn.ollama.online?'Ollama online':'Ollama offline';
+  document.getElementById('f-ollama').className=conn.ollama.online?'online':'offline';
+  document.getElementById('f-comfy').textContent=conn.comfy.online?'ComfyUI online':'ComfyUI offline';
+  document.getElementById('f-comfy').className=conn.comfy.online?'online':'offline';
+  document.getElementById('f-model').textContent=mem.local_model||'geniva-brain';
+
+  // Live perf monitor in footer — polls every 5s
+  const perfEl = document.getElementById('f-perf');
+  async function updatePerf() {
+    try {
+      const p = await ipcRenderer.invoke('get-perf');
+      const labels = ['OK','Low','Med','High'];
+      const colors = ['#4ade80','#fbbf24','#f97316','#ef4444'];
+      perfEl.style.color = colors[p.throttle];
+      perfEl.textContent = `GPU:${p.gpu}% VRAM:${Math.round(p.vram/1024*10)/10}G RAM:${p.ram}G free CPU:${p.cpu}% [${labels[p.throttle]}]`;
+      perfEl.title = `Throttle level: ${labels[p.throttle]} — GPU layers/batch/threads adjusted automatically`;
+    } catch { perfEl.textContent = '--'; }
+  }
+  updatePerf();
+  setInterval(updatePerf, 5000);
+}
+startup();
+</script>
+</body></html>
