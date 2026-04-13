@@ -140,7 +140,13 @@ const toolImpls = {
       await sleep(1000); // let VRAM settle
     }
 
+    // Throttle ComfyUI's process priority so the system stays usable
+    throttleComfyUI();
+
     const checkpoint = getSetting('comfyui_checkpoint', 'sd_xl_base_1.0.safetensors');
+    const imgWidth = getSetting('comfyui_width', 768);
+    const imgHeight = getSetting('comfyui_height', 768);
+    const imgSteps = getSetting('comfyui_steps', 20);
 
     // If workflow_json is a plain text description, build a basic txt2img workflow
     let wf;
@@ -155,8 +161,8 @@ const toolImpls = {
           "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: checkpoint } },
           "2": { class_type: "CLIPTextEncode", inputs: { text: workflow_json, clip: ["1", 1] } },
           "3": { class_type: "CLIPTextEncode", inputs: { text: "blurry, low quality, distorted, deformed", clip: ["1", 1] } },
-          "4": { class_type: "EmptyLatentImage", inputs: { width: 1024, height: 1024, batch_size: 1 } },
-          "5": { class_type: "KSampler", inputs: { seed, steps: 25, cfg: 7, sampler_name: "dpmpp_2m_sde", scheduler: "karras", denoise: 1.0, model: ["1", 0], positive: ["2", 0], negative: ["3", 0], latent_image: ["4", 0] } },
+          "4": { class_type: "EmptyLatentImage", inputs: { width: imgWidth, height: imgHeight, batch_size: 1 } },
+          "5": { class_type: "KSampler", inputs: { seed, steps: imgSteps, cfg: 7, sampler_name: "dpmpp_2m_sde", scheduler: "karras", denoise: 1.0, model: ["1", 0], positive: ["2", 0], negative: ["3", 0], latent_image: ["4", 0] } },
           "6": { class_type: "VAEDecode", inputs: { samples: ["5", 0], vae: ["1", 2] } },
           "7": { class_type: "SaveImage", inputs: { filename_prefix: "geniva_gen", images: ["6", 0] } }
         };
@@ -205,6 +211,12 @@ const toolImpls = {
     for (let i = 0; i < 300; i++) {
       await sleep(1000);
       if (_abortController && _abortController.signal.aborted) return JSON.stringify({ error: 'Aborted' });
+      // Re-throttle every 10s and show progress
+      if (i % 10 === 0 && i > 0) {
+        throttleComfyUI();
+        const v = getVramUsage();
+        broadcast('geniva-activity', `🎨 Generating... (${i}s, VRAM: ${v.pct}%)`);
+      }
       try {
         const hRes = await fetch(`${url}/history/${prompt_id}`);
         const hText = await hRes.text();
@@ -833,6 +845,16 @@ function getVramUsage() {
   } catch { return { used: 0, total: 16376, pct: 0 }; }
 }
 
+// Lower ComfyUI's python process priority so the system stays responsive during image generation
+function throttleComfyUI() {
+  try {
+    // ComfyUI runs as python.exe — set all python processes to below normal
+    // (non-blocking so we don't freeze the UI)
+    const p = cpSpawn('wmic', ['process', 'where', "name='python.exe'", 'call', 'setpriority', 'below normal'], { shell: true, stdio: 'ignore' });
+    p.on('error', () => {});
+  } catch {}
+}
+
 // ─── Adaptive Performance Monitor ───
 // Samples GPU, RAM, and CPU to detect system pressure and adjust Geniva's intensity in real-time.
 const _perfState = {
@@ -980,6 +1002,12 @@ function computeThrottle(perf) {
 async function adaptiveThrottle() {
   const perf = await sampleSystemMetrics();
   const throttle = computeThrottle(perf);
+
+  // If GPU is heavily loaded (ComfyUI generating, game running, etc), throttle those too
+  if (perf.gpuUtil > 80) {
+    throttleComfyUI();
+  }
+
   if (throttle.delayMs > 0) {
     await sleep(throttle.delayMs);
   }
