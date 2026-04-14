@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Geniva's Brain</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  background: transparent;
+  overflow: hidden;
+  width: 100vw; height: 100vh;
+  user-select: none;
+}
+canvas {
+  position: fixed; top: 0; left: 0;
+  width: 100vw; height: 100vh;
+  pointer-events: auto;
+}
+
+.tooltip {
+  position: fixed;
+  background: #111119ee;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 8px 12px;
+  color: #ddd;
+  font: 11px 'Segoe UI', sans-serif;
+  pointer-events: none;
+  display: none;
+  z-index: 100;
+  max-width: 260px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 2px 12px #00000066;
+}
+.tooltip.visible { display: block; }
+.tooltip .tt-title { font-weight: 600; font-size: 12px; color: #fff; margin-bottom: 3px; }
+.tooltip .tt-cat { font-size: 9px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+.tooltip .tt-links { font-size: 10px; color: #666; margin-top: 4px; }
+
+.note-panel {
+  position: fixed; display: none; z-index: 200; pointer-events: auto;
+  border-radius: 10px; overflow: hidden;
+  box-shadow: 0 4px 30px rgba(0,0,0,0.6);
+  border: 1px solid #333;
+  backdrop-filter: blur(20px);
+  background: #111119ee;
+  min-width: 380px; max-width: 520px; max-height: 70vh;
+  flex-direction: column;
+}
+.note-panel.visible { display: flex; }
+
+.note-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px; background: #181820; border-bottom: 1px solid #2a2a35;
+  cursor: move; flex-shrink: 0;
+}
+.note-header .note-title { font: 600 13px 'Segoe UI', sans-serif; color: #ddd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; margin-right: 8px; }
+.note-header .note-cat { font-size: 9px; color: #111; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 8px; flex-shrink: 0; }
+.note-header .note-close { background: none; border: none; color: #666; font-size: 18px; cursor: pointer; padding: 0 4px; flex-shrink: 0; }
+.note-header .note-close:hover { color: #e04040; }
+
+.note-body { padding: 16px; overflow-y: auto; flex: 1; font: 13px/1.7 'Segoe UI', sans-serif; color: #ccc; }
+.note-body h1 { font-size: 20px; color: #e0e0e0; margin: 16px 0 8px 0; border-bottom: 1px solid #333; padding-bottom: 6px; }
+.note-body h2 { font-size: 16px; color: #c0c0c0; margin: 14px 0 6px 0; }
+.note-body h3 { font-size: 14px; color: #aaa; margin: 10px 0 4px 0; }
+.note-body h4 { font-size: 13px; color: #999; margin: 8px 0 4px 0; }
+.note-body p { margin: 6px 0; }
+.note-body ul, .note-body ol { margin: 6px 0; padding-left: 20px; }
+.note-body li { margin: 2px 0; }
+.note-body strong { color: #e0e0e0; }
+.note-body em { color: #bbb; font-style: italic; }
+.note-body code { background: #1a1a24; color: #7c9ff5; padding: 1px 5px; border-radius: 3px; font-family: 'Cascadia Code','Consolas',monospace; font-size: 12px; }
+.note-body pre { background: #0d0d14; border: 1px solid #2a2a35; border-radius: 6px; padding: 10px; overflow-x: auto; margin: 8px 0; }
+.note-body pre code { background: none; padding: 0; font-size: 11px; color: #bbb; }
+.note-body blockquote { border-left: 3px solid #444; padding-left: 12px; color: #999; margin: 8px 0; }
+.note-body hr { border: none; border-top: 1px solid #333; margin: 12px 0; }
+.note-body a, .note-body .wiki-link { color: #7c9ff5; cursor: pointer; text-decoration: none; }
+.note-body a:hover, .note-body .wiki-link:hover { color: #a0b8ff; text-decoration: underline; }
+.note-body .tag { color: #4ade80; font-size: 11px; }
+
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #555; }
+</style>
+</head>
+<body>
+<canvas id="brain"></canvas>
+
+<div class="tooltip" id="tooltip">
+  <div class="tt-title" id="ttTitle"></div>
+  <div class="tt-cat" id="ttCat"></div>
+  <div class="tt-links" id="ttLinks"></div>
+</div>
+
+<div class="note-panel" id="notePanel">
+  <div class="note-header" id="notePanelHeader">
+    <span class="note-title" id="noteTitle"></span>
+    <span class="note-cat" id="noteCat"></span>
+    <button class="note-close" id="noteClose">&times;</button>
+  </div>
+  <div class="note-body" id="noteBody"></div>
+</div>
+
+<script>
+const { ipcRenderer } = require('electron');
+
+// ─── Obsidian-style colors — clean, muted, techy ───
+const COLORS = {
+  'Hub':          [180, 170, 255],
+  'Project':      [100, 210, 140],
+  'Architecture': [80, 170, 230],
+  'Tool':         [220, 170, 60],
+  'Workflow':     [200, 120, 180],
+  'Session':      [130, 130, 150],
+  'Claude Chat':  [110, 110, 130],
+  'Raw Session':  [90, 90, 110],
+  'Ideas':        [230, 190, 60],
+  'People':       [220, 150, 80],
+  'Other':        [120, 120, 130]
+};
+
+function rgb(cat) { return COLORS[cat] || COLORS.Other; }
+function rgba(cat, a) { const c = rgb(cat); return `rgba(${c[0]},${c[1]},${c[2]},${a})`; }
+function hexColor(cat) { const c = rgb(cat); return '#' + c.map(v => v.toString(16).padStart(2,'0')).join(''); }
+
+// ─── State ───
+let nodes = [], edges = [], nodeMap = {}, fileDataMap = {};
+let canvas, ctx, W, H;
+let hoveredNode = null, selectedNode = null, noteOpen = false;
+let drag = { active: false, node: null, sx: 0, sy: 0, moved: false };
+let panelDrag = { active: false, sx: 0, sy: 0, ox: 0, oy: 0 };
+let time = 0;
+let cam = { x: 0, y: 0, zoom: 1 };
+let fairyPos = null;
+
+// ─── Neural firing state ───
+let isThinking = false;
+let firingPulses = [];   // active pulses travelling along edges
+let activeNodes = new Set(); // nodes currently "lit up"
+let fireInterval = null;
+
+// ─── Init ───
+window.addEventListener('DOMContentLoaded', async () => {
+  canvas = document.getElementById('brain');
+  ctx = canvas.getContext('2d');
+  resize();
+  window.addEventListener('resize', resize);
+
+  const data = await ipcRenderer.invoke('scan-brain-vault');
+  buildGraph(data);
+  setupNotePanel();
+  setupBrainActivity();
+
+  // Get initial fairy position and start tracking
+  await updateFairyPos();
+  setInterval(updateFairyPos, 500); // fallback poll
+  // Real-time updates from main process during drag/move
+  ipcRenderer.on('fairy-moved', (e, pos) => {
+    if (pos) fairyPos = pos;
+    updateCameraToFairy();
+  });
+  animate();
+});
+
+async function updateFairyPos() {
+  const pos = await ipcRenderer.invoke('get-fairy-position');
+  if (pos) fairyPos = pos;
+  updateCameraToFairy();
+}
+
+// Camera follows fairy — world origin (0,0) maps to fairy's screen position
+function updateCameraToFairy() {
+  if (!fairyPos) return;
+  cam.x = fairyPos.x - W / 2;
+  cam.y = fairyPos.y - H / 2;
+}
+
+function resize() {
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = W * devicePixelRatio;
+  canvas.height = H * devicePixelRatio;
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+}
+
+function worldToScreen(wx, wy) {
+  return { x: wx * cam.zoom + W / 2 + cam.x, y: wy * cam.zoom + H / 2 + cam.y };
+}
+function screenToWorld(sx, sy) {
+  return { x: (sx - W / 2 - cam.x) / cam.zoom, y: (sy - H / 2 - cam.y) / cam.zoom };
+}
+
+// ─── Build graph ───
+function buildGraph(data) {
+  const files = data.files || [];
+  files.forEach(f => { fileDataMap[f.name] = f; });
+
+  const linkCounts = {};
+  files.forEach(f => {
+    linkCounts[f.name] = (linkCounts[f.name] || 0);
+    (f.links || []).forEach(ln => {
+      linkCounts[f.name] = (linkCounts[f.name] || 0) + 1;
+      linkCounts[ln] = (linkCounts[ln] || 0) + 1;
+    });
+  });
+
+  files.forEach((f, i) => {
+    const conns = linkCounts[f.name] || 0;
+    const angle = (i / files.length) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
+    const jitter = (Math.random() - 0.5) * 40; // per-node orbit variation
+    // Temp node to calculate orbit radius
+    const tempCat = f.category;
+    const baseR = tempCat === 'Hub' ? 100 : tempCat === 'Project' ? 130 : tempCat === 'Session' ? 200 : 160;
+    const distFromCenter = baseR + jitter + 20;
+    nodes.push({
+      id: f.name, label: f.name, path: f.path,
+      category: f.category, links: f.links || [], conns,
+      x: Math.cos(angle) * distFromCenter,
+      y: Math.sin(angle) * distFromCenter,
+      vx: 0, vy: 0,
+      _orbitJitter: jitter, // stored for getOrbitRadius
+      baseSize: Math.max(2, Math.min(7, 2 + conns * 0.7)),
+      pinned: false,
+      fireGlow: 0  // 0-1 brightness from neural firing
+    });
+    nodeMap[f.name] = nodes[nodes.length - 1];
+  });
+
+  files.forEach(f => {
+    (f.links || []).forEach(target => {
+      if (nodeMap[target]) edges.push({ source: f.name, target: target });
+    });
+  });
+
+  for (let i = 0; i < 300; i++) applyForces(0.8 * (1 - i / 300));
+}
+
+// ─── Neural firing system (context-aware) ───
+let relevantNodes = [];  // nodes matching the current thinking context
+
+// Split PascalCase/camelCase into individual words: "YettiPaintStudio" → ["yetti", "paint", "studio"]
+function splitCamelCase(str) {
+  return str.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2').toLowerCase().split(/[\s\-_]+/);
+}
+
+// Build keyword map for each node — used to match activity context
+function buildNodeKeywords() {
+  nodes.forEach(n => {
+    const words = new Set();
+    // Split on spaces, hyphens, underscores AND PascalCase boundaries
+    splitCamelCase(n.label).forEach(w => { if (w.length > 2) words.add(w); });
+    n.label.toLowerCase().split(/[\s\-_]+/).forEach(w => { if (w.length > 2) words.add(w); });
+    words.add(n.label.toLowerCase());
+    words.add(n.category.toLowerCase());
+    n.links.forEach(l => {
+      words.add(l.toLowerCase());
+      splitCamelCase(l).forEach(w => { if (w.length > 2) words.add(w); });
+      l.toLowerCase().split(/[\s\-_]+/).forEach(w => { if (w.length > 2) words.add(w); });
+    });
+    // Add path-based keywords
+    if (n.path) {
+      n.path.toLowerCase().split(/[\/\\]/).forEach(w => { if (w.length > 2) words.add(w); });
+    }
+    n._keywords = words;
+  });
+}
+
+// Find nodes relevant to a text context
+function findRelevantNodes(text) {
+  if (!text) return [];
+  const lower = text.toLowerCase();
+  const scored = [];
+
+  nodes.forEach(n => {
+    let score = 0;
+    // Exact name match is strongest
+    if (lower.includes(n.label.toLowerCase())) score += 10;
+    // Keyword matches
+    for (const kw of n._keywords) {
+      if (lower.includes(kw)) score += 1;
+    }
+    // Boost hub/project/tool nodes (more likely to be relevant)
+    if (score > 0 && (n.category === 'Hub' || n.category === 'Project' || n.category === 'Tool')) {
+      score += 2;
+    }
+    if (score > 0) scored.push({ node: n, score });
+  });
+
+  // Sort by score, take top matches
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, 15).map(s => s.node);
+}
+
+// Get edges connecting a set of nodes (and their immediate neighbors)
+function getRelevantEdges(relevantSet) {
+  const ids = new Set(relevantSet.map(n => n.id));
+  return edges.filter(e => ids.has(e.source) || ids.has(e.target));
+}
+
+function setupBrainActivity() {
+  buildNodeKeywords();
+
+  ipcRenderer.on('geniva-thinking', (e, state) => {
+    isThinking = state;
+    if (state) startFiring();
+    else stopFiring();
+  });
+
+  // Context-aware firing — match activity text to brain regions
+  ipcRenderer.on('brain-fire-context', (e, text) => {
+    const matched = findRelevantNodes(text);
+    if (matched.length > 0) {
+      relevantNodes = matched;
+      // Fire from matched nodes
+      fireFromNodes(matched, 0.8);
+    }
+  });
+
+  ipcRenderer.on('geniva-activity', (e, msg) => {
+    // Match activity messages to nodes — only fire if there's a real match
+    const matched = findRelevantNodes(msg);
+    if (matched.length > 0) {
+      relevantNodes = matched;
+      fireFromNodes(matched.slice(0, 5), 0.6);
+    }
+    // No fallback — if nothing matches, nothing fires
+  });
+}
+
+function startFiring() {
+  if (fireInterval) return;
+  fireInterval = setInterval(() => {
+    // Only fire when there are relevant nodes matched by context — no random fallback
+    if (relevantNodes.length > 0) {
+      const pick = relevantNodes.slice(0, 3 + Math.floor(Math.random() * 3));
+      fireFromNodes(pick, 0.5 + Math.random() * 0.3);
+    }
+    // If nothing matched, nothing fires — brain stays quiet until context triggers it
+  }, 200);
+}
+
+function stopFiring() {
+  clearInterval(fireInterval);
+  fireInterval = null;
+  relevantNodes = [];
+}
+
+// Fire pulses starting from specific nodes — prefer edges connecting to other relevant nodes
+function fireFromNodes(sourceNodes, brightness) {
+  const relevantIds = new Set(relevantNodes.map(n => n.id));
+
+  sourceNodes.forEach(srcNode => {
+    // Find edges connected to this node
+    const nodeEdges = edges.filter(e => e.source === srcNode.id || e.target === srcNode.id);
+    if (nodeEdges.length === 0) return;
+
+    // Prefer edges that lead to other relevant nodes (context-aware firing)
+    const relevantEdges = nodeEdges.filter(e => {
+      const other = e.source === srcNode.id ? e.target : e.source;
+      return relevantIds.has(other);
+    });
+
+    // Use relevant edges if available, otherwise use connected edges
+    const candidates = relevantEdges.length > 0 ? relevantEdges : nodeEdges;
+    const fireCount = Math.min(candidates.length, 1 + Math.floor(Math.random() * 2));
+    const picked = candidates.sort(() => Math.random() - 0.5).slice(0, fireCount);
+
+    picked.forEach(edge => {
+      const target = edge.source === srcNode.id ? edge.target : edge.source;
+      firingPulses.push({
+        source: srcNode.id, target: target,
+        t: 0,
+        speed: 0.015 + Math.random() * 0.025,
+        brightness: brightness * (0.7 + Math.random() * 0.3)
+      });
+    });
+
+    // Light up source node
+    srcNode.fireGlow = Math.min(1, srcNode.fireGlow + brightness * 0.6);
+  });
+}
+
+function updateFiring() {
+  // Advance pulses
+  for (let i = firingPulses.length - 1; i >= 0; i--) {
+    const p = firingPulses[i];
+    p.t += p.speed;
+    if (p.t >= 1) {
+      const tgt = nodeMap[p.target];
+      if (tgt) tgt.fireGlow = Math.min(1, tgt.fireGlow + 0.4);
+      firingPulses.splice(i, 1);
+
+      // Chain reaction — follow actual connections, biased toward relevant nodes
+      if (isThinking && Math.random() < 0.35) {
+        const tgtEdges = edges.filter(e => e.source === p.target || e.target === p.target);
+        if (tgtEdges.length > 0) {
+          // Prefer edges leading to relevant nodes
+          const relevantIds = new Set(relevantNodes.map(n => n.id));
+          let candidates = tgtEdges.filter(e => {
+            const other = e.source === p.target ? e.target : e.source;
+            return other !== p.source && relevantIds.has(other);
+          });
+          if (candidates.length === 0) {
+            candidates = tgtEdges.filter(e => {
+              const other = e.source === p.target ? e.target : e.source;
+              return other !== p.source;
+            });
+          }
+          if (candidates.length > 0) {
+            const next = candidates[Math.floor(Math.random() * candidates.length)];
+            const nextTarget = next.source === p.target ? next.target : next.source;
+            firingPulses.push({
+              source: p.target, target: nextTarget,
+              t: 0, speed: 0.015 + Math.random() * 0.025,
+              brightness: p.brightness * 0.75
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // Decay node glow
+  nodes.forEach(n => {
+    if (n.fireGlow > 0) n.fireGlow = Math.max(0, n.fireGlow - 0.015);
+  });
+}
+
+// ─── Force simulation ───
+let simAlpha = 0.02;
+const EXCLUSION_RADIUS = 65; // small clear zone right around the fairy sprite
+
+// Orbit layers — nodes assigned by importance
+// Hub/Project nodes orbit close, Sessions/Raw far out
+function getOrbitRadius(n) {
+  if (n.category === 'Hub')          return 100 + (n._orbitJitter || 0);
+  if (n.category === 'Project')      return 130 + (n._orbitJitter || 0);
+  if (n.category === 'Architecture') return 150 + (n._orbitJitter || 0);
+  if (n.category === 'Tool')         return 140 + (n._orbitJitter || 0);
+  if (n.category === 'Workflow')     return 160 + (n._orbitJitter || 0);
+  if (n.category === 'Ideas')        return 170 + (n._orbitJitter || 0);
+  if (n.category === 'People')       return 170 + (n._orbitJitter || 0);
+  if (n.category === 'Session')      return 200 + (n._orbitJitter || 0);
+  if (n.category === 'Claude Chat')  return 220 + (n._orbitJitter || 0);
+  if (n.category === 'Raw Session')  return 240 + (n._orbitJitter || 0);
+  return 180 + (n._orbitJitter || 0);
+}
+
+function applyForces(alpha) {
+  const repulse = 400, attract = 0.004, damping = 0.82;
+
+  // Repulsion between nodes
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i], b = nodes[j];
+      let dx = b.x - a.x, dy = b.y - a.y;
+      let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      let force = (repulse * alpha) / (dist * dist);
+      let fx = (dx / dist) * force, fy = (dy / dist) * force;
+      if (!a.pinned) { a.vx -= fx; a.vy -= fy; }
+      if (!b.pinned) { b.vx += fx; b.vy += fy; }
+    }
+  }
+
+  // Attraction along edges
+  edges.forEach(e => {
+    const a = nodeMap[e.source], b = nodeMap[e.target];
+    if (!a || !b) return;
+    let dx = b.x - a.x, dy = b.y - a.y;
+    let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    let force = (dist - 50) * attract * alpha;
+    let fx = (dx / dist) * force, fy = (dy / dist) * force;
+    if (!a.pinned) { a.vx += fx; a.vy += fy; }
+    if (!b.pinned) { b.vx -= fx; b.vy -= fy; }
+  });
+
+  // Orbit + exclusion — each node has its own target radius
+  nodes.forEach(n => {
+    if (n.pinned) return;
+
+    let dx = n.x, dy = n.y; // distance from origin (fairy center)
+    let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    const nx = dx / dist, ny = dy / dist;
+    const targetR = getOrbitRadius(n);
+
+    // Anti-gravity — push out if too close to fairy
+    if (dist < EXCLUSION_RADIUS) {
+      const push = (EXCLUSION_RADIUS - dist) * 0.015;
+      n.vx += nx * push;
+      n.vy += ny * push;
+    }
+
+    // Gentle pull toward orbit ring
+    const ringForce = (dist - targetR) * 0.0002;
+    n.vx -= nx * ringForce;
+    n.vy -= ny * ringForce;
+
+    // Slow orbital drift — gives the whole thing a gentle spin
+    const driftSpeed = 0.00003;
+    n.vx += -ny * driftSpeed * targetR;
+    n.vy +=  nx * driftSpeed * targetR;
+
+    n.vx *= damping; n.vy *= damping;
+    n.x += n.vx; n.y += n.vy;
+  });
+}
+
+// ─── Drawing ───
+function animate() {
+  time += 0.016;
+  applyForces(simAlpha);
+  updateFiring();
+  draw();
+  requestAnimationFrame(animate);
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  ctx.save();
+  ctx.translate(W / 2 + cam.x, H / 2 + cam.y);
+  ctx.scale(cam.zoom, cam.zoom);
+
+  // ── Edges — very subtle, fade in on hover/fire ──
+  edges.forEach(e => {
+    const a = nodeMap[e.source], b = nodeMap[e.target];
+    if (!a || !b) return;
+    const isHighlight = selectedNode && (e.source === selectedNode.id || e.target === selectedNode.id);
+    const isHoverHL = hoveredNode && (e.source === hoveredNode.id || e.target === hoveredNode.id);
+    const edgeFire = Math.max(a.fireGlow, b.fireGlow);
+
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+
+    if (isHighlight || isHoverHL) {
+      const c = rgb(a.category);
+      ctx.strokeStyle = `rgba(${c[0]},${c[1]},${c[2]},0.25)`;
+      ctx.lineWidth = 0.8 / cam.zoom;
+    } else if (edgeFire > 0.05) {
+      ctx.strokeStyle = `rgba(160,200,255,${edgeFire * 0.35})`;
+      ctx.lineWidth = (0.4 + edgeFire * 1) / cam.zoom;
+    } else {
+      ctx.strokeStyle = 'rgba(255,255,255,0.025)';
+      ctx.lineWidth = 0.3 / cam.zoom;
+    }
+    ctx.stroke();
+  });
+
+  // ── Firing pulses ──
+  firingPulses.forEach(p => {
+    const a = nodeMap[p.source], b = nodeMap[p.target];
+    if (!a || !b) return;
+    const px = a.x + (b.x - a.x) * p.t;
+    const py = a.y + (b.y - a.y) * p.t;
+    const r = (1.5 + p.brightness * 1.5) / cam.zoom;
+
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(200,220,255,${p.brightness * 0.8})`;
+    ctx.fill();
+
+    const grad = ctx.createRadialGradient(px, py, 0, px, py, r * 3);
+    grad.addColorStop(0, `rgba(160,200,255,${p.brightness * 0.2})`);
+    grad.addColorStop(1, 'rgba(160,200,255,0)');
+    ctx.beginPath();
+    ctx.arc(px, py, r * 3, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+  });
+
+  // ── Nodes — soft dots with gentle glow ──
+  nodes.forEach(n => {
+    const isHovered = hoveredNode === n;
+    const isSelected = selectedNode === n;
+    const isConnected = selectedNode && edges.some(
+      e => (e.source === selectedNode.id && e.target === n.id) ||
+           (e.target === selectedNode.id && e.source === n.id)
+    );
+    const dimmed = selectedNode && !isSelected && !isConnected;
+    const size = n.baseSize * (isHovered ? 1.4 : isSelected ? 1.2 : 1);
+    const col = rgb(n.category);
+    const fire = n.fireGlow;
+
+    // Base alpha — softer idle state
+    const baseAlpha = dimmed ? 0.08 : (isHovered || isSelected) ? 0.95 : 0.45 + fire * 0.4;
+
+    // Soft glow halo
+    if (!dimmed) {
+      const haloR = size + (isHovered || isSelected ? 8 : 3) + fire * 8;
+      const haloAlpha = (isHovered || isSelected ? 0.12 : 0.03) + fire * 0.15;
+      const grad = ctx.createRadialGradient(n.x, n.y, size * 0.5, n.x, n.y, haloR);
+      if (fire > 0.1) {
+        grad.addColorStop(0, `rgba(180,210,255,${haloAlpha})`);
+        grad.addColorStop(1, 'rgba(180,210,255,0)');
+      } else {
+        grad.addColorStop(0, `rgba(${col[0]},${col[1]},${col[2]},${haloAlpha})`);
+        grad.addColorStop(1, `rgba(${col[0]},${col[1]},${col[2]},0)`);
+      }
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, haloR, 0, Math.PI * 2);
+      ctx.fillStyle = grad;
+      ctx.fill();
+    }
+
+    // Main dot
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, size, 0, Math.PI * 2);
+    if (fire > 0.1) {
+      const fb = Math.min(1, fire);
+      ctx.fillStyle = `rgba(${col[0] + (255-col[0])*fb*0.5 |0},${col[1] + (255-col[1])*fb*0.5 |0},${col[2] + (255-col[2])*fb*0.4 |0},${baseAlpha})`;
+    } else {
+      ctx.fillStyle = `rgba(${col[0]},${col[1]},${col[2]},${baseAlpha})`;
+    }
+    ctx.fill();
+
+    // Labels — only on hover/select, keeps it clean
+    if (isHovered || isSelected || isConnected) {
+      const fontSize = Math.max(8, (isHovered || isSelected ? 10 : 8) / cam.zoom);
+      ctx.font = `${fontSize}px 'Segoe UI', sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = `rgba(230,230,240,${isHovered || isSelected ? 0.85 : 0.5})`;
+      ctx.shadowColor = 'rgba(0,0,0,0.9)';
+      ctx.shadowBlur = 4 / cam.zoom;
+      ctx.fillText(n.label, n.x, n.y + size + 10 / cam.zoom);
+      ctx.shadowBlur = 0;
+    }
+  });
+
+  ctx.restore();
+}
+
+// ─── Mouse interaction ───
+function findNodeAt(sx, sy) {
+  const { x: wx, y: wy } = screenToWorld(sx, sy);
+  let closest = null, closestDist = Infinity;
+  nodes.forEach(n => {
+    const dx = n.x - wx, dy = n.y - wy;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const hitRadius = Math.max(n.baseSize * 2, 12);
+    if (dist < hitRadius && dist < closestDist) { closest = n; closestDist = dist; }
+  });
+  return closest;
+}
+
+document.addEventListener('mousemove', e => {
+  const sx = e.clientX, sy = e.clientY;
+  if (drag.active && drag.node) {
+    const { x, y } = screenToWorld(sx, sy);
+    drag.node.x = x; drag.node.y = y;
+    drag.node.vx = 0; drag.node.vy = 0;
+    drag.moved = true;
+    ipcRenderer.send('brain-set-ignore-mouse', false);
+    return;
+  }
+  const node = findNodeAt(sx, sy);
+  if (node) {
+    hoveredNode = node;
+    ipcRenderer.send('brain-set-ignore-mouse', false);
+    canvas.style.cursor = 'pointer';
+    const tt = document.getElementById('tooltip');
+    document.getElementById('ttTitle').textContent = node.label;
+    document.getElementById('ttCat').textContent = node.category;
+    const connCount = edges.filter(e => e.source === node.id || e.target === node.id).length;
+    document.getElementById('ttLinks').textContent = connCount + ' connections \u00b7 click to read';
+    tt.classList.add('visible');
+    tt.style.left = (sx + 16) + 'px';
+    tt.style.top = (sy - 10) + 'px';
+    const r = tt.getBoundingClientRect();
+    if (r.right > W) tt.style.left = (sx - r.width - 10) + 'px';
+    if (r.bottom > H) tt.style.top = (sy - r.height - 10) + 'px';
+  } else {
+    if (hoveredNode) {
+      hoveredNode = null;
+      document.getElementById('tooltip').classList.remove('visible');
+      canvas.style.cursor = 'default';
+    }
+    if (!noteOpen) ipcRenderer.send('brain-set-ignore-mouse', true);
+  }
+});
+
+document.addEventListener('wheel', e => {
+  if (e.target.closest('.note-panel')) return;
+  e.preventDefault();
+  const factor = e.deltaY > 0 ? 0.9 : 1.1;
+  cam.zoom = Math.max(0.15, Math.min(6, cam.zoom * factor));
+  // Camera still follows fairy — zoom just changes scale
+  updateCameraToFairy();
+}, { passive: false });
+
+document.addEventListener('mousedown', e => {
+  if (e.target.closest('.note-panel')) return;
+  const node = findNodeAt(e.clientX, e.clientY);
+  if (node) {
+    drag.active = true; drag.node = node;
+    drag.sx = e.clientX; drag.sy = e.clientY; drag.moved = false;
+    node.pinned = true; simAlpha = 0.1;
+  }
+});
+
+document.addEventListener('mouseup', e => {
+  if (drag.active && drag.node) {
+    if (!drag.moved) { selectedNode = drag.node; openNote(drag.node); }
+    drag.node.pinned = false; simAlpha = 0.05;
+  }
+  drag.active = false; drag.node = null;
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { if (noteOpen) closeNote(); else window.close(); }
+});
+
+// ─── Note Panel ───
+function setupNotePanel() {
+  const panel = document.getElementById('notePanel');
+  const header = document.getElementById('notePanelHeader');
+  const closeBtn = document.getElementById('noteClose');
+  closeBtn.addEventListener('click', () => closeNote());
+
+  header.addEventListener('mousedown', e => {
+    if (e.target === closeBtn) return;
+    panelDrag.active = true; panelDrag.sx = e.clientX; panelDrag.sy = e.clientY;
+    const rect = panel.getBoundingClientRect();
+    panelDrag.ox = rect.left; panelDrag.oy = rect.top;
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', e => {
+    if (!panelDrag.active) return;
+    panel.style.left = (panelDrag.ox + e.clientX - panelDrag.sx) + 'px';
+    panel.style.top = (panelDrag.oy + e.clientY - panelDrag.sy) + 'px';
+    panel.style.right = 'auto'; panel.style.bottom = 'auto';
+  });
+  document.addEventListener('mouseup', () => { panelDrag.active = false; });
+}
+
+async function openNote(node) {
+  const panel = document.getElementById('notePanel');
+  const sp = worldToScreen(node.x, node.y);
+  let px = Math.min(sp.x + 30, W - 540);
+  let py = Math.min(Math.max(sp.y - 100, 10), H - 400);
+  panel.style.left = px + 'px'; panel.style.top = py + 'px';
+  panel.style.right = 'auto'; panel.style.bottom = 'auto';
+
+  document.getElementById('noteTitle').textContent = node.label;
+  const catEl = document.getElementById('noteCat');
+  catEl.textContent = node.category; catEl.style.background = hexColor(node.category);
+  document.getElementById('noteBody').innerHTML = '<div style="color:#666;padding:20px;text-align:center">Loading...</div>';
+  panel.classList.add('visible');
+  noteOpen = true;
+  ipcRenderer.send('brain-set-ignore-mouse', false);
+  document.getElementById('tooltip').classList.remove('visible');
+
+  const fileData = fileDataMap[node.id];
+  if (!fileData) { document.getElementById('noteBody').innerHTML = '<div style="color:#888">Note not found</div>'; return; }
+
+  const result = await ipcRenderer.invoke('read-brain-note', fileData.path);
+  if (result.error) { document.getElementById('noteBody').innerHTML = '<div style="color:#e04040">Error: ' + result.error + '</div>'; return; }
+
+  const bodyEl = document.getElementById('noteBody');
+  bodyEl.innerHTML = renderMarkdown(result.content);
+  bodyEl.querySelectorAll('.wiki-link').forEach(el => {
+    el.addEventListener('click', ev => {
+      ev.preventDefault();
+      const targetNode = nodeMap[el.dataset.target];
+      if (targetNode) {
+        selectedNode = targetNode;
+        cam.x = -targetNode.x * cam.zoom; cam.y = -targetNode.y * cam.zoom;
+        openNote(targetNode);
+      }
+    });
+  });
+}
+
+function closeNote() {
+  document.getElementById('notePanel').classList.remove('visible');
+  noteOpen = false; selectedNode = null;
+  ipcRenderer.send('brain-set-ignore-mouse', true);
+}
+
+// ─── Markdown renderer ───
+function renderMarkdown(md) {
+  let html = escapeHtml(md);
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (m, lang, code) => '<pre><code>' + code.trim() + '</code></pre>');
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  html = html.replace(/\[\[([^\]|]+?)\|([^\]]+?)\]\]/g, (m, target, display) => {
+    let name = target; if (name.includes('/')) name = name.split('/').pop();
+    return '<span class="wiki-link" data-target="' + name + '">' + display + '</span>';
+  });
+  html = html.replace(/\[\[([^\]]+?)\]\]/g, (m, target) => {
+    let name = target; if (name.includes('/')) name = name.split('/').pop();
+    return '<span class="wiki-link" data-target="' + name + '">' + name + '</span>';
+  });
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" title="$2">$1</a>');
+  html = html.replace(/^---+$/gm, '<hr>');
+  html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+  html = html.replace(/#(\w[\w-]*)/g, '<span class="tag">#$1</span>');
+  html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+  html = html.replace(/(<li>.*<\/li>\n?)+/g, m => '<ul>' + m + '</ul>');
+  html = html.split('\n').map(line => {
+    const t = line.trim();
+    if (!t) return '';
+    if (t.startsWith('<h') || t.startsWith('<ul') || t.startsWith('<li') || t.startsWith('<pre') || t.startsWith('<blockquote') || t.startsWith('<hr') || t.startsWith('</')) return line;
+    return '<p>' + line + '</p>';
+  }).join('\n');
+  html = html.replace(/<p>\s*<\/p>/g, '');
+  return html;
+}
+
+function escapeHtml(text) {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+</script>
+</body>
+</html>

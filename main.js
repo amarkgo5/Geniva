@@ -59,10 +59,11 @@ let _brain = 'local';
 let _abortController = null;
 let fairyWin = null;
 let panelWin = null;
+let brainWin = null;
 
 // ─── Broadcast to all windows ───
 function _sendToWindows(channel, ...args) {
-  for (const w of [fairyWin, panelWin]) {
+  for (const w of [fairyWin, panelWin, brainWin]) {
     if (w && !w.isDestroyed()) {
       try { w.webContents.send(channel, ...args); } catch {}
     }
@@ -132,13 +133,11 @@ const toolImpls = {
     try { await fetch(`${url}/system_stats`, { timeout: 3000 }); }
     catch { return 'ComfyUI is offline — start ComfyUI and try again.'; }
 
-    // Free VRAM for ComfyUI — unload Ollama model before generating
+    // Free VRAM for ComfyUI — always unload Ollama model before generating
+    _comfyActive = true;
     const vram = getVramUsage();
-    if (vram.pct > 50) {
-      broadcast('geniva-activity', `💾 VRAM at ${vram.pct}% — unloading model to make room for ComfyUI`);
-      await unloadOllamaModel();
-      await sleep(1000); // let VRAM settle
-    }
+    broadcast('geniva-activity', `💾 VRAM at ${vram.pct}% — switching to CPU mode for ComfyUI generation`);
+    await unloadOllamaModel();
 
     const checkpoint = getSetting('comfyui_checkpoint', 'sd_xl_base_1.0.safetensors');
     const imgWidth = getSetting('comfyui_width', 768);
@@ -235,18 +234,22 @@ const toolImpls = {
                 fs.writeFileSync(desktopPath, imgBuf);
                 broadcast('geniva-activity', `📁 Saved image to ${desktopPath}`);
                 _addWorkLog('generated_image', desktopPath);
+                _comfyActive = false;
                 return `Image generated successfully and saved to: ${desktopPath}`;
               } catch (dlErr) {
                 // Couldn't download but image was generated
                 _addWorkLog('generated_image', `ComfyUI output: ${filename}`);
+                _comfyActive = false;
                 return `Image generated in ComfyUI as ${filename} but could not copy to desktop: ${dlErr.message}`;
               }
             }
           }
+          _comfyActive = false;
           return JSON.stringify({ prompt_id, outputs });
         }
       } catch {}
     }
+    _comfyActive = false;
     return JSON.stringify({ error: 'Timed out waiting for ComfyUI generation (5 minutes)' });
   },
   async comfyui_upload_image({ image_path }) {
@@ -372,13 +375,11 @@ const toolImpls = {
     const comfyUrl = getSetting('comfyui_url', 'http://127.0.0.1:8000');
     const checkpoint = getSetting('comfyui_checkpoint', 'sd_xl_base_1.0.safetensors');
 
-    // Free VRAM for ComfyUI iterations
+    // Free VRAM for ComfyUI iterations — switch to CPU mode
+    _comfyActive = true;
     const vram = getVramUsage();
-    if (vram.pct > 50) {
-      broadcast('geniva-activity', `💾 VRAM at ${vram.pct}% — freeing for image matching`);
-      await unloadOllamaModel();
-      await sleep(1000);
-    }
+    broadcast('geniva-activity', `💾 VRAM at ${vram.pct}% — switching to CPU mode for image matching`);
+    await unloadOllamaModel();
     const pixelLora = getSetting('pixel_art_lora', 'pixel-art-xl.safetensors');
     const log = (msg) => broadcast('geniva-activity', msg);
 
@@ -445,6 +446,7 @@ const toolImpls = {
         promptText = analysis.substring(0, 300) + '. ' + diffs.slice(0, 2).map(d => 'Fix: ' + d).join('. ');
       }
     }
+    _comfyActive = false;
     if (bestScore > 0) { const mem = loadMemory(); mem.image_match_best_settings = { promptText, loraStrength, cfg, steps, ipWeight, negPrompt, bestScore, bestIteration }; saveMemoryFile(mem); }
     return `Best result: iteration ${bestIteration} with ${bestScore}% similarity. Images: ${JSON.stringify(bestImages)}. Settings saved to memory.`;
   }
@@ -703,7 +705,14 @@ RULES:
 USER PATHS — always use these exact paths:
 - Home directory: ${HOME_DIR}
 - Desktop: ${DESKTOP_PATH}
-- Username: ${path.basename(HOME_DIR)}`;
+- Documents: ${path.join(HOME_DIR, 'Documents')}
+- Brain Vault (Obsidian knowledge base): ${path.join(HOME_DIR, 'Documents', 'BrainVault')}
+- Username: ${path.basename(HOME_DIR)}
+
+KNOWLEDGE BASE — You have an Obsidian vault at the Brain Vault path above. It contains project notes, session logs, architecture docs, tool references, and decision logs. When asked about projects, tools, or past work, ALWAYS check the Brain Vault first:
+1. list_files on the Brain Vault directory and its subdirectories (Projects/, Tools/, Sessions/, Architecture/, etc.)
+2. read_file on relevant .md files to find the information
+Key project notes: Projects/YettiPaintStudio/YettiPaintStudio.md, Projects/Geniva/Geniva.md, Projects/DragonTD/DragonTD.md`;
 
 function localSystemPrompt() {
   const mem = loadMemory();
@@ -760,8 +769,19 @@ RULES:
 PATHS:
 - Home: ${HOME_DIR}
 - Desktop: ${DESKTOP_PATH}
+- Documents: ${path.join(HOME_DIR, 'Documents')}
+- Brain Vault: ${path.join(HOME_DIR, 'Documents', 'BrainVault')}
 - Username: ${path.basename(HOME_DIR)}
 - Geniva app: ${__dirname}
+
+KNOWLEDGE BASE — You have an Obsidian vault at the Brain Vault path above. It contains project notes, session logs, architecture docs, and decision logs about all the user's projects. When asked about projects, tools, or past work, ALWAYS check the Brain Vault first:
+1. Use list_files on the Brain Vault directory to see what's there
+2. Use read_file on relevant .md files to find the information
+Key project notes you should check:
+- ${path.join(HOME_DIR, 'Documents', 'BrainVault', 'Projects', 'YettiPaintStudio', 'YettiPaintStudio.md')}
+- ${path.join(HOME_DIR, 'Documents', 'BrainVault', 'Projects', 'Geniva', 'Geniva.md')}
+- ${path.join(HOME_DIR, 'Documents', 'BrainVault', 'Projects', 'DragonTD', 'DragonTD.md')}
+- ${path.join(HOME_DIR, 'Documents', 'BrainVault', 'Decisions Log.md')}
 
 SOFTWARE:
 - Python 3.11 + Pillow — use for image processing tasks
@@ -818,7 +838,13 @@ function trimMessages(messages, maxTokens) {
   return [systemMsg, ...kept];
 }
 
-// ─── VRAM Management — evict Ollama model to make room for ComfyUI and vice versa ───
+// ─── VRAM Management — dynamic GPU/CPU switching for Ollama ───
+// Ollama runs on GPU for fast Geniva responses (~35s vs ~90s on CPU).
+// Before ComfyUI generation, we fully unload the model from VRAM.
+// After generation, the model auto-reloads with GPU layers on next chat.
+// The adaptive throttle scales GPU layers based on available VRAM.
+let _comfyActive = false; // true while ComfyUI is generating — forces CPU-only mode
+
 async function unloadOllamaModel() {
   // Send keep_alive=0 to force-unload the model from VRAM immediately
   try {
@@ -829,8 +855,16 @@ async function unloadOllamaModel() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model, prompt: '', keep_alive: 0 })
     });
-    broadcast('geniva-activity', '💾 Unloaded model from VRAM to free space');
+    broadcast('geniva-activity', '💾 Unloaded model from VRAM');
   } catch {} // Ollama might not be running
+
+  // Wait for VRAM to actually free up (Ollama doesn't release instantly)
+  for (let i = 0; i < 10; i++) {
+    await sleep(500);
+    const v = getVramUsage();
+    // ComfyUI model is ~8GB, so if VRAM is under 9GB the Ollama model is gone
+    if (v.used < 9500) return;
+  }
 }
 
 function getVramUsage() {
@@ -918,6 +952,19 @@ function computeThrottle(perf) {
   const baseBatch = getSetting('num_batch', 256);
   const baseThreads = Math.max(2, Math.min(8, (require('os').cpus().length) - 4));
 
+  // ─── ComfyUI active: force CPU-only mode, no GPU layers at all ───
+  if (_comfyActive) {
+    _perfState.currentGpuLayers = 0;
+    _perfState.currentBatch = baseBatch;
+    _perfState.currentThreads = baseThreads;
+    _perfState.throttleDelayMs = 0;
+    if (_perfState.throttleLevel !== 99) {
+      _perfState.throttleLevel = 99;
+      broadcast('geniva-activity', '🎨 ComfyUI generating — Geniva on CPU mode (GPU reserved for image gen)');
+    }
+    return { gpuLayers: 0, batch: baseBatch, threads: baseThreads, delayMs: 0, level: 99 };
+  }
+
   const gpuPressure = perf.gpuUtil > 85;
   const vramPressure = perf.gpuVramUsedMB > perf.gpuVramTotalMB * 0.85;
   const vramHigh = perf.gpuVramUsedMB > perf.gpuVramTotalMB * 0.65; // ComfyUI is probably loaded
@@ -933,7 +980,7 @@ function computeThrottle(perf) {
   let gpuLayers, batch, threads, delayMs;
 
   switch (level) {
-    case 0: // System is fine — use full settings
+    case 0: // System is fine — use full settings (GPU for speed!)
       gpuLayers = baseGpuLayers;
       batch = baseBatch;
       threads = baseThreads;
@@ -952,7 +999,7 @@ function computeThrottle(perf) {
       delayMs = 1500;
       break;
     case 3: // Heavy — minimal GPU, max breathing room
-      gpuLayers = Math.max(0, Math.floor(baseGpuLayers * 0.3));
+      gpuLayers = 0;
       batch = 32;
       threads = 2;
       delayMs = 3000;
@@ -964,11 +1011,14 @@ function computeThrottle(perf) {
   if (vramHigh && level < 2) {
     const vramFreeMB = perf.gpuVramTotalMB - perf.gpuVramUsedMB;
     // Only use GPU layers that fit comfortably — rough estimate: ~200MB per layer
-    const maxLayersForVram = Math.floor(vramFreeMB / 200);
+    // Reserve 4GB minimum for ComfyUI generation headroom
+    const reserveMB = 4000;
+    const availableForOllama = Math.max(0, vramFreeMB - reserveMB);
+    const maxLayersForVram = Math.floor(availableForOllama / 200);
     if (maxLayersForVram < gpuLayers) {
       gpuLayers = Math.max(0, maxLayersForVram);
       if (level === 0) delayMs = 300; // tiny delay since we're partially on CPU now
-      broadcast('geniva-activity', `💾 VRAM busy (${perf.gpuVramUsedMB}MB used) — reducing to ${gpuLayers} GPU layers`);
+      broadcast('geniva-activity', `💾 VRAM busy (${perf.gpuVramUsedMB}MB) — ${gpuLayers} GPU layers (reserving ${reserveMB}MB for ComfyUI)`);
     }
   }
 
@@ -1192,6 +1242,7 @@ async function executeTool(name, args) {
     web_search: '🔍', image_match_task: '🔄' };
   const icon = icons[name] || '🧠';
   broadcast('geniva-activity', `${icon} ${name}(${JSON.stringify(args || {}).substring(0, 120)})`);
+  broadcast('brain-fire-context', `${name} ${JSON.stringify(args || {}).substring(0, 200)}`);
   let result;
   try {
     result = toolImpls[name] ? await toolImpls[name](args || {}) : `Unknown tool: ${name}`;
@@ -1272,6 +1323,7 @@ function broadcast(channel, ...args) {
 
 // ─── Work log — remembers what files/images she created ───
 const WORKLOG_PATH = path.join(__dirname, 'worklog.json');
+const BRAIN_VAULT_PATH = 'C:\\Users\\amark\\Documents\\BrainVault';
 
 function loadWorkLog() {
   try { if (fs.existsSync(WORKLOG_PATH)) return JSON.parse(fs.readFileSync(WORKLOG_PATH, 'utf-8')); } catch {}
@@ -1282,6 +1334,91 @@ function _addWorkLog(type, detail) {
   log.push({ type, detail, date: new Date().toISOString() });
   if (log.length > 100) log.splice(0, log.length - 100);
   fs.writeFileSync(WORKLOG_PATH, JSON.stringify(log, null, 2), 'utf-8');
+}
+
+// ─── Brain Vault Auto-Journal ───
+// Writes task summaries to Obsidian after each completed Geniva task.
+// Daily journal file: Sessions/YYYY-MM-DD Geniva Journal.md
+// Also updates Decisions Log for errors/learnings.
+
+function _brainVaultJournal(userMessage, reply, tools, success, errorMsg) {
+  try {
+    const now = new Date();
+    // Use local time for date (not UTC) so journal files match the user's day
+    const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+    const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+    const journalDir = path.join(BRAIN_VAULT_PATH, 'Sessions');
+    const journalFile = path.join(journalDir, `${dateStr} Geniva Journal.md`);
+
+    // Create journal file with header if it doesn't exist
+    if (!fs.existsSync(journalFile)) {
+      const header = `# ${dateStr}: Geniva Activity Journal\n**Auto-generated** by Geniva's Brain Vault integration.\n\n---\n\n`;
+      fs.writeFileSync(journalFile, header, 'utf-8');
+    }
+
+    // Build the entry
+    const toolList = tools && tools.length > 0 ? tools.join(', ') : 'none';
+    const status = success ? 'OK' : 'FAILED';
+    const replySnippet = reply ? reply.substring(0, 200).replace(/\n/g, ' ') : '(no reply)';
+
+    let entry = `### ${timeStr} — ${status}\n`;
+    entry += `**Asked:** ${userMessage.substring(0, 300)}\n`;
+    if (tools && tools.length > 0) entry += `**Tools:** ${toolList}\n`;
+    entry += `**Result:** ${replySnippet}`;
+    if (replySnippet.length < (reply || '').length) entry += '...';
+    entry += '\n';
+    if (!success && errorMsg) entry += `**Error:** ${errorMsg.substring(0, 200)}\n`;
+    entry += '\n---\n\n';
+
+    fs.appendFileSync(journalFile, entry, 'utf-8');
+
+    // If a ComfyUI image was generated, log extra detail
+    if (tools && tools.some(t => t === 'comfyui_generate') && reply && reply.includes('saved to')) {
+      const imgMatch = reply.match(/saved to:\s*(.+?)(?:\s|$)/);
+      if (imgMatch) {
+        const imgNote = `> Image saved: \`${imgMatch[1]}\`\n\n`;
+        // Insert before the last ---
+        const content = fs.readFileSync(journalFile, 'utf-8');
+        const lastDash = content.lastIndexOf('---');
+        if (lastDash > 0) {
+          const updated = content.substring(0, lastDash) + imgNote + content.substring(lastDash);
+          fs.writeFileSync(journalFile, updated, 'utf-8');
+        }
+      }
+    }
+
+    // Log errors to Decisions Log as lessons learned
+    if (!success && errorMsg && errorMsg.length > 10) {
+      _brainVaultLogDecision(dateStr, userMessage, errorMsg);
+    }
+  } catch (e) {
+    console.log('[BrainVault] Journal write failed:', e.message);
+  }
+}
+
+function _brainVaultLogDecision(dateStr, task, errorMsg) {
+  try {
+    const decisionsFile = path.join(BRAIN_VAULT_PATH, 'Decisions Log.md');
+    if (!fs.existsSync(decisionsFile)) return;
+
+    // Only log unique errors — don't spam the decisions log
+    const content = fs.readFileSync(decisionsFile, 'utf-8');
+    const errorKey = errorMsg.substring(0, 60);
+    if (content.includes(errorKey)) return; // Already logged
+
+    const entry = `\n## ${dateStr}: Geniva Error — ${task.substring(0, 80)}\n` +
+      `**What happened:** ${errorMsg.substring(0, 300)}\n` +
+      `**Context:** Auto-logged by Geniva after task failure.\n\n`;
+
+    // Insert before ## Tags line
+    const tagsIdx = content.indexOf('## Tags');
+    if (tagsIdx > 0) {
+      const updated = content.substring(0, tagsIdx) + entry + content.substring(tagsIdx);
+      fs.writeFileSync(decisionsFile, updated, 'utf-8');
+    }
+  } catch (e) {
+    console.log('[BrainVault] Decision log write failed:', e.message);
+  }
 }
 function buildWorkLogContext() {
   const log = loadWorkLog();
@@ -1309,6 +1446,7 @@ async function genivaThink(userMessage, imagePath) {
   _currentTaskSteps = [];
   _currentTaskMessage = userMessage;
   broadcast('geniva-thinking', true);
+  broadcast('brain-fire-context', userMessage);
   let success = true;
   let errorMsg = null;
   let usedFallback = false;
@@ -1364,7 +1502,12 @@ async function genivaThink(userMessage, imagePath) {
   // Active learning — learn from this task
   learnFromTask(_currentTaskMessage, _currentTaskSteps, success, errorMsg);
   const lastReply = _chatHistory.filter(c => c.role === 'geniva').slice(-1)[0];
-  addToHistory(_currentTaskMessage, lastReply ? lastReply.text : errorMsg, _currentTaskSteps.map(s => s.tool), success);
+  const toolsUsed = _currentTaskSteps.map(s => s.tool);
+  addToHistory(_currentTaskMessage, lastReply ? lastReply.text : errorMsg, toolsUsed, success);
+
+  // Auto-journal to Brain Vault (Obsidian)
+  _brainVaultJournal(_currentTaskMessage, lastReply ? lastReply.text : errorMsg, toolsUsed, success, errorMsg);
+
   _abortController = null;
   broadcast('geniva-thinking', false);
   broadcast('geniva-done', true);
@@ -1505,7 +1648,7 @@ async function agentLoopLocal(userMessage, imagePath) {
 
   while (iterations < MAX_LOCAL_ITERATIONS) {
     iterations++;
-    if (_abortController.signal.aborted) { broadcast('geniva-reply', 'Task stopped.'); break; }
+    if (_abortController && _abortController.signal.aborted) { broadcast('geniva-reply', 'Task stopped.'); break; }
 
     // Adaptive throttle — pause between steps if system is under pressure
     if (iterations > 1) await adaptiveThrottle();
@@ -1697,7 +1840,7 @@ async function agentLoopClaudeAPI(userMessage, imagePath) {
   let iterations = 0;
   while (iterations < MAX_LOCAL_ITERATIONS) {
     iterations++;
-    if (_abortController.signal.aborted) { broadcast('geniva-reply', 'Task stopped.'); break; }
+    if (_abortController && _abortController.signal.aborted) { broadcast('geniva-reply', 'Task stopped.'); break; }
     broadcast('geniva-activity', `🧠 Thinking... (step ${iterations})`);
     const response = await callClaudeAPI(messages);
     let hasToolUse = false; const toolResults = [];
@@ -1849,6 +1992,10 @@ ipcMain.on('fairy-drag', (event, { dx, dy }) => {
   if (!fairyWin || fairyWin.isDestroyed()) return;
   const b = fairyWin.getBounds();
   fairyWin.setPosition(b.x + dx, b.y + dy);
+  // Broadcast position to brain in real time during drag
+  if (brainWin && !brainWin.isDestroyed()) {
+    brainWin.webContents.send('fairy-moved', { x: b.x + dx + b.width / 2, y: b.y + dy + b.height / 2 });
+  }
 });
 
 // Toggle click-through on transparent areas
@@ -1862,6 +2009,122 @@ ipcMain.on('save-fairy-pos', (event, pos) => {
   const mem = loadMemory(); mem.last_position = pos; saveMemoryFile(mem);
 });
 
+// ─── Brain Vault Scanner ───
+// BRAIN_VAULT_PATH is defined near the worklog section above
+
+function scanBrainVault() {
+  const files = [];
+  if (!fs.existsSync(BRAIN_VAULT_PATH)) return { files };
+
+  function walkDir(dir) {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      if (entry.name === 'node_modules' || entry.name === '.obsidian') continue;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) { walkDir(full); }
+      else if (entry.name.endsWith('.md')) {
+        try {
+          const content = fs.readFileSync(full, 'utf8');
+          const rel = path.relative(BRAIN_VAULT_PATH, full).replace(/\\/g, '/');
+          const name = path.basename(full, '.md');
+
+          // Determine category from path
+          let category = 'Other';
+          if (rel.startsWith('Projects/')) category = 'Project';
+          else if (rel.startsWith('Architecture/')) category = 'Architecture';
+          else if (rel.startsWith('Tools/')) category = 'Tool';
+          else if (rel.startsWith('Workflows/')) category = 'Workflow';
+          else if (rel.startsWith('Sessions/raw/')) category = 'Raw Session';
+          else if (rel.startsWith('Sessions/Claude Chats/')) category = 'Claude Chat';
+          else if (rel.startsWith('Sessions/')) category = 'Session';
+          else if (rel.startsWith('Ideas/')) category = 'Ideas';
+          else if (rel.startsWith('People/')) category = 'People';
+          // Hub detection
+          if (['Home', 'Session Notes', 'Decisions Log', 'Claude Memories', 'Claude Projects'].includes(name)) category = 'Hub';
+
+          // Extract [[wiki links]]
+          const linkRegex = /\[\[([^\]|]+?)(?:\|[^\]]+)?\]\]/g;
+          const links = [];
+          let m;
+          while ((m = linkRegex.exec(content)) !== null) {
+            // Handle path-style links like Claude Chats/2026-... → extract just the filename
+            let linkName = m[1];
+            if (linkName.includes('/')) linkName = linkName.split('/').pop();
+            links.push(linkName);
+          }
+
+          // Preview — first meaningful lines
+          const lines = content.split('\n');
+          let preview = '';
+          let count = 0;
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('---')) continue;
+            preview += trimmed + '\n';
+            if (++count >= 6) break;
+          }
+
+          files.push({ name, path: rel, category, links, preview: preview.trim() });
+        } catch {}
+      }
+    }
+  }
+
+  walkDir(BRAIN_VAULT_PATH);
+  return { files };
+}
+
+ipcMain.handle('scan-brain-vault', () => scanBrainVault());
+
+ipcMain.handle('get-fairy-position', () => {
+  if (!fairyWin || fairyWin.isDestroyed()) return null;
+  const b = fairyWin.getBounds();
+  // Return center of the fairy sprite (roughly center of the 380x400 window)
+  return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+});
+
+ipcMain.handle('read-brain-note', (event, relPath) => {
+  try {
+    const full = path.join(BRAIN_VAULT_PATH, relPath);
+    // Safety: make sure it's within the vault
+    if (!full.startsWith(BRAIN_VAULT_PATH)) return { error: 'Invalid path' };
+    const content = fs.readFileSync(full, 'utf8');
+    return { content };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+// ─── Brain Window ───
+function createBrainWindow() {
+  if (brainWin && !brainWin.isDestroyed()) {
+    brainWin.close();
+    brainWin = null;
+    return; // Toggle off
+  }
+  const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
+  brainWin = new BrowserWindow({
+    width: sw, height: sh, x: 0, y: 0,
+    frame: false, transparent: true, alwaysOnTop: false,
+    resizable: false, skipTaskbar: true, hasShadow: false,
+    backgroundColor: '#00000000',
+    thickFrame: false, roundedCorners: false,
+    type: 'desktop',
+    webPreferences: { nodeIntegration: true, contextIsolation: false }
+  });
+  brainWin.loadFile('brain.html');
+  brainWin.showInactive();
+  brainWin.setIgnoreMouseEvents(true, { forward: true });
+  brainWin.on('closed', () => { brainWin = null; });
+}
+
+// Brain window click-through toggle
+ipcMain.on('brain-set-ignore-mouse', (event, ignore) => {
+  if (!brainWin || brainWin.isDestroyed()) return;
+  brainWin.setIgnoreMouseEvents(ignore, { forward: true });
+});
+
 // Context menu
 ipcMain.on('show-context-menu', (event) => {
   const template = [
@@ -1869,6 +2132,7 @@ ipcMain.on('show-context-menu', (event) => {
     { label: 'Claude Code Brain', type: 'radio', checked: _brain === 'claude-code', click: () => { _brain = 'claude-code'; broadcast('brain-changed', 'claude-code'); }},
     { label: 'Claude API Brain', type: 'radio', checked: _brain === 'claude-api', click: () => { _brain = 'claude-api'; broadcast('brain-changed', 'claude-api'); }},
     { type: 'separator' },
+    { label: brainWin && !brainWin.isDestroyed() ? 'Close Brain' : 'Open Brain', click: () => createBrainWindow() },
     { label: 'Open Full App', click: () => { ipcMain.emit('open-panel'); }},
     { type: 'separator' },
     { label: 'Quit Geniva', click: () => app.quit() }
@@ -1895,11 +2159,15 @@ function createFairyWindow() {
   // Click-through on transparent areas, but forward mouse events so we detect hover
   fairyWin.setIgnoreMouseEvents(true, { forward: true });
 
-  // Track position on move
+  // Track position on move — broadcast to brain window in real time
   fairyWin.on('moved', () => {
     if (fairyWin && !fairyWin.isDestroyed()) {
       const b = fairyWin.getBounds();
       const mem2 = loadMemory(); mem2.last_position = { x: b.x, y: b.y }; saveMemoryFile(mem2);
+      // Notify brain window of new fairy position immediately
+      if (brainWin && !brainWin.isDestroyed()) {
+        brainWin.webContents.send('fairy-moved', { x: b.x + b.width / 2, y: b.y + b.height / 2 });
+      }
     }
   });
 }

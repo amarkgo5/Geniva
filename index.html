@@ -332,6 +332,25 @@ fairyBox.addEventListener('contextmenu', (e) => {
   ipcRenderer.send('show-context-menu');
 });
 
+let _bubbleIdleTimer = null;
+
+function resetBubbleIdleTimer() {
+  clearTimeout(_bubbleIdleTimer);
+  // Restore full opacity if fading
+  if (bubbleVisible && bubble.style.opacity !== '1') {
+    bubble.style.transition = '';
+    bubble.style.opacity = '1';
+  }
+  _bubbleIdleTimer = setTimeout(() => {
+    if (bubbleVisible && bubbleInputWrap.style.display !== 'none') {
+      // Only auto-fade the input bubble, not responses
+      bubble.style.transition = 'opacity 1.5s ease';
+      bubble.style.opacity = '0';
+      setTimeout(() => { if (bubble.style.opacity === '0') hideBubble(); }, 1500);
+    }
+  }, 10000);
+}
+
 function showBubbleInput() {
   clearTimeout(bubbleFadeTimer);
   // Expand window to fit bubble above fairy
@@ -347,6 +366,7 @@ function showBubbleInput() {
   bubbleVisible = true;
   positionBubble();
   setTimeout(() => bubbleInput.focus(), 50);
+  resetBubbleIdleTimer();
 }
 
 function showBubbleResponse(text) {
@@ -383,12 +403,19 @@ function typeText(text) {
 
 function hideBubble() {
   clearTimeout(bubbleFadeTimer);
+  clearTimeout(_bubbleIdleTimer);
   bubble.classList.remove('visible');
   bubble.style.opacity = '1';
   bubble.style.transition = '';
   bubbleVisible = false;
   ipcRenderer.send('fairy-expand', false);
 }
+
+// Reset idle timer on any interaction with the bubble
+bubble.addEventListener('mousemove', () => { if (bubbleVisible) resetBubbleIdleTimer(); });
+bubble.addEventListener('mouseenter', () => { if (bubbleVisible) resetBubbleIdleTimer(); });
+bubbleInput.addEventListener('input', () => { if (bubbleVisible) resetBubbleIdleTimer(); });
+bubbleInput.addEventListener('focus', () => { if (bubbleVisible) resetBubbleIdleTimer(); });
 
 function positionBubble() {
   // Position handled by CSS now
@@ -527,17 +554,34 @@ function addFeedLine(text, type) {
 }
 
 function startFeed() {
+  clearTimeout(_feedHideTimer);
   feedActive = true;
+  liveFeed.style.transition = '';
+  liveFeed.style.opacity = '';
   liveFeed.classList.add('active');
-  // Clear old feed when starting new task
   liveFeed.innerHTML = '';
 }
 
+let _feedHideTimer = null;
+
 function stopFeed() {
   feedActive = false;
-  // Keep the feed visible but dim all lines — don't clear it
+  // Dim all lines
   const lines = liveFeed.querySelectorAll('.feed-line');
   lines.forEach(l => l.classList.add('dim'));
+
+  // Fade out and hide after 10 seconds
+  clearTimeout(_feedHideTimer);
+  _feedHideTimer = setTimeout(() => {
+    liveFeed.style.transition = 'opacity 1.5s ease';
+    liveFeed.style.opacity = '0';
+    setTimeout(() => {
+      liveFeed.classList.remove('active');
+      liveFeed.innerHTML = '';
+      liveFeed.style.transition = '';
+      liveFeed.style.opacity = '';
+    }, 1500);
+  }, 10000);
 }
 
 // ─── Fairy states ───
