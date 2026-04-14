@@ -1323,7 +1323,7 @@ function broadcast(channel, ...args) {
 
 // ─── Work log — remembers what files/images she created ───
 const WORKLOG_PATH = path.join(__dirname, 'worklog.json');
-const BRAIN_VAULT_PATH = 'C:\\Users\\amark\\Documents\\BrainVault';
+const BRAIN_VAULT_PATH = path.join(HOME_DIR, 'Documents', 'BrainVault');
 
 function loadWorkLog() {
   try { if (fs.existsSync(WORKLOG_PATH)) return JSON.parse(fs.readFileSync(WORKLOG_PATH, 'utf-8')); } catch {}
