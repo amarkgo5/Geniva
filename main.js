@@ -1006,19 +1006,34 @@ function computeThrottle(perf) {
       break;
   }
 
-  // ─── VRAM coexistence: if something else (ComfyUI, game, etc.) is using significant VRAM,
-  //     reduce GPU layers proportionally so Ollama doesn't OOM or fight for VRAM ───
-  if (vramHigh && level < 2) {
+  // ─── VRAM coexistence: if something else (ComfyUI, Yetti, game, etc.) is using
+  //     significant VRAM, reduce GPU layers so Ollama doesn't fight for VRAM.
+  //
+  //     2026-04-16 FIX: was gated on `level < 2` which meant at moderate system
+  //     pressure (level 2) Geniva still loaded 12 GPU layers (~2.4GB) onto an
+  //     already-full GPU. Combined with Hunyuan3D's stuck VRAM (cudaMallocAsync
+  //     fragmentation doesn't release on /free), this pushed total VRAM past 16GB
+  //     and locked the PC. Now: the VRAM cap applies at ALL pressure levels.
+  //     Additionally: if VRAM is over 80% (critical), force 0 GPU layers — hard cut. ───
+  const vramCritical = perf.gpuVramUsedMB > perf.gpuVramTotalMB * 0.80; // >80% = danger zone
+  if (vramCritical) {
+    // Hard cut — no GPU layers at all, something heavy is using the GPU
+    gpuLayers = 0;
+    if (!_perfState._lastVramWarn || Date.now() - _perfState._lastVramWarn > 30000) {
+      broadcast('geniva-activity', `⚠️ VRAM critical (${perf.gpuVramUsedMB}/${perf.gpuVramTotalMB}MB) — forcing CPU-only mode`);
+      _perfState._lastVramWarn = Date.now();
+    }
+  } else if (vramHigh) {
     const vramFreeMB = perf.gpuVramTotalMB - perf.gpuVramUsedMB;
     // Only use GPU layers that fit comfortably — rough estimate: ~200MB per layer
-    // Reserve 4GB minimum for ComfyUI generation headroom
+    // Reserve 4GB minimum for ComfyUI / Yetti generation headroom
     const reserveMB = 4000;
     const availableForOllama = Math.max(0, vramFreeMB - reserveMB);
     const maxLayersForVram = Math.floor(availableForOllama / 200);
     if (maxLayersForVram < gpuLayers) {
       gpuLayers = Math.max(0, maxLayersForVram);
-      if (level === 0) delayMs = 300; // tiny delay since we're partially on CPU now
-      broadcast('geniva-activity', `💾 VRAM busy (${perf.gpuVramUsedMB}MB) — ${gpuLayers} GPU layers (reserving ${reserveMB}MB for ComfyUI)`);
+      if (delayMs === 0) delayMs = 300;
+      broadcast('geniva-activity', `💾 VRAM busy (${perf.gpuVramUsedMB}MB) — ${gpuLayers} GPU layers (reserving ${reserveMB}MB headroom)`);
     }
   }
 
